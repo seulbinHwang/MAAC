@@ -15,7 +15,7 @@ class AttentionCritic(nn.Module):
         """
         Inputs:
             sa_sizes (list of (int, int)): Size of state and action spaces per
-                                          agent
+                                          agent -> [(obsp.shape[0], acsp.n), ... ]
             hidden_dim (int): Number of hidden dimensions
             norm_in (bool): Whether to apply BatchNorm to input
             attend_heads (int): Number of attention heads to use (use a number
@@ -27,7 +27,7 @@ class AttentionCritic(nn.Module):
         self.nagents = len(sa_sizes)
         self.attend_heads = attend_heads
 
-        self.critic_encoders = nn.ModuleList()
+        self.critic_encoders = nn.ModuleList() # encoder * n 마리
         self.critics = nn.ModuleList()
 
         self.state_encoders = nn.ModuleList()
@@ -42,6 +42,7 @@ class AttentionCritic(nn.Module):
             encoder.add_module('enc_fc1', nn.Linear(idim, hidden_dim))
             encoder.add_module('enc_nl', nn.LeakyReLU())
             self.critic_encoders.append(encoder)
+
             critic = nn.Sequential()
             critic.add_module('critic_fc1', nn.Linear(2 * hidden_dim,
                                                       hidden_dim))
@@ -68,7 +69,7 @@ class AttentionCritic(nn.Module):
             self.value_extractors.append(nn.Sequential(nn.Linear(hidden_dim,
                                                                 attend_dim),
                                                        nn.LeakyReLU()))
-
+        ###
         self.shared_modules = [self.key_extractors, self.selector_extractors,
                                self.value_extractors, self.critic_encoders]
 
@@ -111,12 +112,14 @@ class AttentionCritic(nn.Module):
         # extract state encoding for each agent that we're returning Q for
         s_encodings = [self.state_encoders[a_i](states[a_i]) for a_i in agents]
         # extract keys for each head for each agent
-        all_head_keys = [[k_ext(enc) for enc in sa_encodings] for k_ext in self.key_extractors]
+        # [ [_, _ , -- 10마리], ... num_head... , [_, _ , -- 10마리] ]
+        all_head_keys = [[k_ext(enc) for enc in sa_encodings] for k_ext in self.key_extractors] # key_extractors = num_head 만큼
         # extract sa values for each head for each agent
         all_head_values = [[v_ext(enc) for enc in sa_encodings] for v_ext in self.value_extractors]
         # extract selectors for each head for each agent that we're returning Q for
+        # state_encoder의 출력값을 인풋으로 넣는다. (selector_extractors 에)
         all_head_selectors = [[sel_ext(enc) for i, enc in enumerate(s_encodings) if i in agents]
-                              for sel_ext in self.selector_extractors]
+                              for sel_ext in self.selector_extractors] #  selector_extractors = query
 
         other_all_values = [[] for _ in range(len(agents))]
         all_attend_logits = [[] for _ in range(len(agents))]
@@ -126,14 +129,17 @@ class AttentionCritic(nn.Module):
                 all_head_keys, all_head_values, all_head_selectors):
             # iterate over agents
             for i, a_i, selector in zip(range(len(agents)), agents, curr_head_selectors):
-                keys = [k for j, k in enumerate(curr_head_keys) if j != a_i]
-                values = [v for j, v in enumerate(curr_head_values) if j != a_i]
+                keys = [k for j, k in enumerate(curr_head_keys) if j != a_i] # 나를 제외한 agent
+                values = [v for j, v in enumerate(curr_head_values) if j != a_i] # 나를 제외한 agent
                 # calculate attention across agents
+                # selector(query) * keys
                 attend_logits = torch.matmul(selector.view(selector.shape[0], 1, -1),
                                              torch.stack(keys).permute(1, 2, 0))
                 # scale dot-products by size of key (from Attention is All You Need)
                 scaled_attend_logits = attend_logits / np.sqrt(keys[0].shape[1])
                 attend_weights = F.softmax(scaled_attend_logits, dim=2)
+
+                # attention score * value
                 other_values = (torch.stack(values).permute(1, 2, 0) *
                                 attend_weights).sum(dim=2)
                 other_all_values[i].append(other_values)
@@ -142,22 +148,25 @@ class AttentionCritic(nn.Module):
         # calculate Q per agent
         all_rets = []
         for i, a_i in enumerate(agents):
+            # attention score 에 대해, 얼마나 안 균일해지는지
             head_entropies = [(-((probs + 1e-8).log() * probs).squeeze().sum(1)
                                .mean()) for probs in all_attend_probs[i]]
             agent_rets = []
+            # state encdoing과 atttention_value 를 concatenate
             critic_in = torch.cat((s_encodings[i], *other_all_values[i]), dim=1)
-            all_q = self.critics[a_i](critic_in)
-            int_acs = actions[a_i].max(dim=1, keepdim=True)[1]
-            q = all_q.gather(1, int_acs)
+            all_q = self.critics[a_i](critic_in) # (n, 2)
+            int_acs = actions[a_i].max(dim=1, keepdim=True)[1] # actions: one hot
+            q = all_q.gather(1, int_acs) # (n, 2) -> (n, 1)
             if return_q:
                 agent_rets.append(q)
             if return_all_q:
                 agent_rets.append(all_q)
             if regularize:
-                # regularize magnitude of attention logits
+                # regularize magnitude of attention logits ( selector(query) * keys ) # [[] for _ in range(len(agents))]
+                # logit 이 num_head 개 씩 있는데, 각각을 제곱한 후 모두 더해서 10*(-3) 을 곱해줍니다.
                 attend_mag_reg = 1e-3 * sum((logit**2).mean() for logit in
                                             all_attend_logits[i])
-                regs = (attend_mag_reg,)
+                regs = (attend_mag_reg,) # attention logit을 regularize 하려는 시도
                 agent_rets.append(regs)
             if return_attend:
                 agent_rets.append(np.array(all_attend_probs[i]))

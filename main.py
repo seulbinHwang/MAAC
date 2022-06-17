@@ -26,6 +26,13 @@ def make_parallel_env(env_id, n_rollout_threads, seed):
         return SubprocVecEnv([get_env_fn(i) for i in range(n_rollout_threads)])
 
 def run(config):
+    """
+    :param config:
+    :return:
+
+    Objectives
+        -
+    """
     model_dir = Path('./models') / config.env_id / config.model_name
     if not model_dir.exists():
         run_num = 1
@@ -55,19 +62,23 @@ def run(config):
                                        critic_hidden_dim=config.critic_hidden_dim,
                                        attend_heads=config.attend_heads,
                                        reward_scale=config.reward_scale)
+    # buffer_length: 100,000
     replay_buffer = ReplayBuffer(config.buffer_length, model.nagents,
                                  [obsp.shape[0] for obsp in env.observation_space],
                                  [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
                                   for acsp in env.action_space])
     t = 0
+    # n_episodes = 50000
+    # n_rollout_threads = 12
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
+        # ep_i: 0, 12, 24, 36,
         print("Episodes %i-%i of %i" % (ep_i + 1,
                                         ep_i + 1 + config.n_rollout_threads,
                                         config.n_episodes))
         obs = env.reset()
         model.prep_rollouts(device='cpu')
 
-        for et_i in range(config.episode_length):
+        for et_i in range(config.episode_length): # 25 -> 0~24
             # rearrange observations to be per agent, and convert to torch Variable
             torch_obs = [Variable(torch.Tensor(np.vstack(obs[:, i])),
                                   requires_grad=False)

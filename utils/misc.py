@@ -98,11 +98,20 @@ def firmmax_sample(logits, temperature, dim=1):
     return F.softmax(y, dim=dim)
 
 def categorical_sample(probs, use_cuda=False):
-    int_acs = torch.multinomial(probs, 1)
+    """
+    :param probs: (_, 2)
+    :param use_cuda:
+    :return:
+
+    Objectives
+        -
+    """
+    int_acs = torch.multinomial(probs, 1) # (n,2) 에서 1개 고르기 (n, 1)
     if use_cuda:
         tensor_type = torch.cuda.FloatTensor
     else:
         tensor_type = torch.FloatTensor
+    # (_, 2)를 어떻게 채우냐? -< 선택된 action 만 1로 채웁니다.
     acs = Variable(tensor_type(*probs.shape).fill_(0)).scatter_(1, int_acs, 1)
     return int_acs, acs
 

@@ -23,6 +23,7 @@ class ReplayBuffer(object):
         self.next_obs_buffs = []
         self.done_buffs = []
         for odim, adim in zip(obs_dims, ac_dims):
+            # [(1000, 180) , ... , (1000, 180)]
             self.obs_buffs.append(np.zeros((max_steps, odim), dtype=np.float32))
             self.ac_buffs.append(np.zeros((max_steps, adim), dtype=np.float32))
             self.rew_buffs.append(np.zeros(max_steps, dtype=np.float32))

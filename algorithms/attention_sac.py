@@ -35,11 +35,13 @@ class AttentionSAC(object):
             hidden_dim (int): Number of hidden dimensions for networks
         """
         self.nagents = len(sa_size)
-
+        # agent_init_params: [{'num_in_pol': obsp.shape[0], 'num_out_pol': acsp.n} , ... * n]
+        # discrete AttentionAgent : actor 여러 개
         self.agents = [AttentionAgent(lr=pi_lr,
                                       hidden_dim=pol_hidden_dim,
                                       **params)
                          for params in agent_init_params]
+        # sa_size -> [(obsp.shape[0], acsp.n), ... ]
         self.critic = AttentionCritic(sa_size, hidden_dim=critic_hidden_dim,
                                       attend_heads=attend_heads)
         self.target_critic = AttentionCritic(sa_size, hidden_dim=critic_hidden_dim,
@@ -202,16 +204,24 @@ class AttentionSAC(object):
             self.trgt_critic_dev = device
 
     def prep_rollouts(self, device='cpu'):
-        for a in self.agents:
-            a.policy.eval()
+        """
+        :param device:
+        :return:
+
+        Objectives
+            - actor의 policy를 eval 상태로 변경
+            - actor을 사용하는 장치가 바뀌었을 때, 이를 적용시킨다.
+        """
+        for a in self.agents: # each actor
+            a.policy.eval() # each.actor > discrete policy
         if device == 'gpu':
             fn = lambda x: x.cuda()
         else:
             fn = lambda x: x.cpu()
         # only need main policy for rollouts
-        if not self.pol_dev == device:
+        if not self.pol_dev == device: # gpu 일떄
             for a in self.agents:
-                a.policy = fn(a.policy)
+                a.policy = fn(a.policy) #
             self.pol_dev = device
 
     def save(self, filename):
@@ -240,6 +250,11 @@ class AttentionSAC(object):
         tau: rate of update for target networks
         lr: learning rate for networks
         hidden_dim: number of hidden dimensions for networks
+
+        classmethod
+            - 클래스를 instance 화 하지 않아도 호출이 가능
+            - static method 와 차이점이라면
+                - 다른 method 및 class 속성에 access 가능
         """
         agent_init_params = []
         sa_size = []
