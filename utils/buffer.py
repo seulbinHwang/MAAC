@@ -23,7 +23,7 @@ class ReplayBuffer(object):
         self.next_obs_buffs = []
         self.done_buffs = []
         for odim, adim in zip(obs_dims, ac_dims):
-            # [(1000, 180) , ... , (1000, 180)]
+            # [(100,000, 180)] * 8
             self.obs_buffs.append(np.zeros((max_steps, odim), dtype=np.float32))
             self.ac_buffs.append(np.zeros((max_steps, adim), dtype=np.float32))
             self.rew_buffs.append(np.zeros(max_steps, dtype=np.float32))
@@ -38,8 +38,16 @@ class ReplayBuffer(object):
         return self.filled_i
 
     def push(self, observations, actions, rewards, next_observations, dones):
-        nentries = observations.shape[0]  # handle multiple parallel environments
-        if self.curr_i + nentries > self.max_steps:
+        """
+        :param observations: (12, 8)
+        :param actions: [(8)] * 12
+        :param rewards: [(8)] * 12
+        :param next_observations: [(8)] * 12
+        :param dones: [(8)] * 12
+        :return:
+        """
+        nentries = observations.shape[0]  # handle multiple parallel environments # 12
+        if self.curr_i + nentries > self.max_steps: # curr_i: current index to write to (ovewrite oldest data)
             rollover = self.max_steps - self.curr_i # num of indices to roll over
             for agent_i in range(self.num_agents):
                 self.obs_buffs[agent_i] = np.roll(self.obs_buffs[agent_i],
@@ -70,6 +78,13 @@ class ReplayBuffer(object):
             self.curr_i = 0
 
     def sample(self, N, to_gpu=False, norm_rews=True):
+        """
+        :param N: batch_size = 1024
+        :param to_gpu:
+        :param norm_rews:
+        :return:
+        """
+        # filled_i: index of first empty location in buffer (last index when full)
         inds = np.random.choice(np.arange(self.filled_i), size=N,
                                 replace=True)
         if to_gpu:

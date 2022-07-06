@@ -7,8 +7,24 @@ from baselines.common.vec_env import VecEnv, CloudpickleWrapper
 
 
 def worker(remote, parent_remote, env_fn_wrapper):
+    """
+    :param remote:
+    :param parent_remote:
+    :param env_fn_wrapper: CloudpickleWrapper(init_env)
+        - Uses cloudpickle to serialize contents (otherwise multiprocessing tries to use pickle)
+    :return:
+
+    Env_fn_wrapper
+        - init_env
+            - env = make_env(env_id, discrete_action=True)
+            - env.seed(seed + rank * 1000)
+            - np.random.seed(seed + rank * 1000)
+
+    Objectives
+        - env = cloudpickle.dumps(init_env)
+    """
     parent_remote.close()
-    env = env_fn_wrapper.x()
+    env = env_fn_wrapper.x() # cloudpickle.dumps(init_env)
     while True:
         cmd, data = remote.recv()
         if cmd == 'step':
@@ -41,11 +57,27 @@ class SubprocVecEnv(VecEnv):
     def __init__(self, env_fns, spaces=None):
         """
         envs: list of gym environments to run in subprocesses
+
+        env_fns: [ init_env , init_env , init_env , init_env , init_env ,  ... n_rollout_threads 개]
+            - init_env
+                - env = make_env(env_id, discrete_action=True)
+                - env.seed(seed + rank * 1000)
+                - np.random.seed(seed + rank * 1000)
+
+        Objectives
+            - n_rollout_threads 개 만큼의 Process 를 만든다. -> env = cloudpickle.dumps(init_env)
+
         """
         self.waiting = False
         self.closed = False
-        nenvs = len(env_fns)
+        nenvs = len(env_fns) # 12
+        # Pipe -> 파이프로 연결된 한 쌍의 연결 객체를 돌려주는데 기본적으로 양방향(duplex)입니다.
+        # Pipe() 가 반환하는 두 개의 연결 객체는 파이프의 두 끝을 나타냅니다.
+        # 각 연결 객체에는 (다른 것도 있지만) send() 및 recv() 메서드가 있습니다.
+        # 두 프로세스 (또는 스레드)가 파이프의 같은 끝에서 동시에 읽거나 쓰려고 하면 파이프의 데이터가 손상될 수 있습니다.
+        # 물론 파이프의 다른 끝을 동시에 사용하는 프로세스로 인해 손상될 위험은 없습니다.
         self.remotes, self.work_remotes = zip(*[Pipe() for _ in range(nenvs)])
+        # n_rollout_threads 개 만큼의 Process 를 만든다. -> env = cloudpickle.dumps(init_env)
         self.ps = [Process(target=worker, args=(work_remote, remote, CloudpickleWrapper(env_fn)))
             for (work_remote, remote, env_fn) in zip(self.work_remotes, self.remotes, env_fns)]
         for p in self.ps:
@@ -96,9 +128,26 @@ class SubprocVecEnv(VecEnv):
 
 class DummyVecEnv(VecEnv):
     def __init__(self, env_fns):
+        """
+        n_rollout_threads 가 1개 일 때만 DummyVecEnv 를 쓴다.
+
+        :param env_fns: [init_env]
+        def init_env():
+            env = make_env(env_id, discrete_action=True)
+            env.seed(seed + rank * 1000)
+            np.random.seed(seed + rank * 1000)
+            return env
+
+        Objectives
+            - 환경 만들고, 환경에 대한 seed 와 np seed를 설정한다.
+            - agent_types : 'adversary(적)' / 'agent'
+        """
         self.envs = [fn() for fn in env_fns]
-        env = self.envs[0]        
+
+        # 환경 만들고, 환경에 대한 seed 와 np seed를 설정한다.
+        env = self.envs[0]
         VecEnv.__init__(self, len(env_fns), env.observation_space, env.action_space)
+        # agent_types : 'adversary(적)' / 'agent'
         if all([hasattr(a, 'adversary') for a in env.agents]):
             self.agent_types = ['adversary' if a.adversary else 'agent' for a in
                                 env.agents]

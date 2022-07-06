@@ -99,19 +99,21 @@ def firmmax_sample(logits, temperature, dim=1):
 
 def categorical_sample(probs, use_cuda=False):
     """
-    :param probs: (_, 2)
+    :param probs: (_, 5)
     :param use_cuda:
     :return:
 
     Objectives
         -
     """
-    int_acs = torch.multinomial(probs, 1) # (n,2) 에서 1개 고르기 (n, 1)
+    # torch.multinomial 함수는 2개의 인자를 받는데, 첫번째 인자는 확률로 해석될 수 있는 텐서이고 두번째는 샘플링할 개수이다.
+    # 샘플링된 값의 인덱스 값이 반환된다.
+    int_acs = torch.multinomial(probs, 1) # (n,5) 에서 1개 고르기 (n, 1)
     if use_cuda:
         tensor_type = torch.cuda.FloatTensor
     else:
         tensor_type = torch.FloatTensor
-    # (_, 2)를 어떻게 채우냐? -< 선택된 action 만 1로 채웁니다.
+    # (_, 5)를 어떻게 채우냐? -< 선택된 action 만 1로 채웁니다.
     acs = Variable(tensor_type(*probs.shape).fill_(0)).scatter_(1, int_acs, 1)
     return int_acs, acs
 

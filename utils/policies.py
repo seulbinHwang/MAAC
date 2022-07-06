@@ -59,23 +59,24 @@ class DiscretePolicy(BasePolicy):
     def forward(self, obs, sample=True, return_all_probs=False,
                 return_log_pi=False, regularize=False,
                 return_entropy=False):
-        out = super(DiscretePolicy, self).forward(obs) # out_dim
-        probs = F.softmax(out, dim=1) # 확률 값들 # (, 2)
+        out = super(DiscretePolicy, self).forward(obs) # out_dim # ( , 5)
+        probs = F.softmax(out, dim=1) # 확률 값들 # (, 5)
         on_gpu = next(self.parameters()).is_cuda
         if sample:
-            int_act, act = categorical_sample(probs, use_cuda=on_gpu) # int_act: 고른 action (_, 1) / act: one hot (_, 2)
+            int_act, act = categorical_sample(probs, use_cuda=on_gpu) # int_act: 고른 action (_, 1) / act: one hot (_, 5)
         else:
+            # (, 5)
             act = onehot_from_logits(probs)
-        rets = [act] # (_, 2)
+        rets = [act] # (_, 5)
         if return_log_pi or return_entropy:
-            log_probs = F.log_softmax(out, dim=1)  # (_, 2)
+            log_probs = F.log_softmax(out, dim=1)  # (_, 5)
         if return_all_probs:
-            rets.append(probs)
+            rets.append(probs) # (_, 5)
         if return_log_pi:
             # return log probability of selected action
-            rets.append(log_probs.gather(1, int_act)) # (_, 2)
+            rets.append(log_probs.gather(1, int_act)) # (_, 1)
         if regularize:
-            rets.append([(out**2).mean()])
+            rets.append([(out**2).mean()]) # ([value])
         if return_entropy:
             rets.append(-(log_probs * probs).sum(1).mean())
         if len(rets) == 1:
